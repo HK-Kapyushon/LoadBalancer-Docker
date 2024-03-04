@@ -45,3 +45,4 @@ const server = http.createServer(requestHandler);
 server.listen(port, () => {
   console.log(`Balanceador de carga escuchando en el puerto: ${port}`);
 });
+
