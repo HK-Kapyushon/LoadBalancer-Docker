@@ -2,13 +2,14 @@ const express = require('express');
 const httpProxy = require('http-proxy');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const moment = require('moment');
+const bodyParser = require('body-parser');
 
-dotenv.config(); // Carga las variables de entorno desde el archivo .env
+dotenv.config();
 
 const app = express();
 const proxy = httpProxy.createProxyServer();
-const servers = process.env.SERVERS.split(','); // Obtiene la lista de servidores desde las variables de entorno
-
+const servers = process.env.SERVERS.split(',');
 let currentServerIndex = 0;
 
 function getNextServer() {
@@ -19,28 +20,36 @@ function getNextServer() {
 
 function proxyToNextServer(req, res) {
     const nextServer = getNextServer();
+    req.activeServer = nextServer;
+    
+    // Configurar un timeout de 3 segundos para intentar la conexión con el servidor
+    const proxyOptions = {
+        target: nextServer,
+        timeout: 10000 // Timeout de 3 segundos en milisegundos
+    };
 
-    proxy.web(req, res, {
-        target: nextServer
-    });
-
-    proxy.once('error', (err) => {
-        console.error(`Error en el proxy al enviar la solicitud al servidor ${nextServer}: ${err.message}`);
-        proxyToNextServer(req, res); // Intenta el siguiente servidor en caso de error
-    });
+    proxy.web(req, res, proxyOptions);
 }
 
+
 app.use(cors());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
 app.use((req, res) => {
     proxyToNextServer(req, res);
 });
 
 proxy.on('proxyRes', (proxyRes, req, res) => {
-    // Maneja el caso en el que ningún servidor responde
-    if (!res.headersSent && proxyRes.statusCode === 502) {
-        res.status(502).send('Error: Ninguno de los servidores responde');
-    }
+    const formattedDate = moment().format('YYYY-MM-DD');
+    const formattedTime = moment().format('HH:mm:ss');
+    const payloadLog = req.body ? JSON.stringify(req.body) : "No hay payload";
+    console.log(`[${formattedDate}/${formattedTime}] - URL: "${req.originalUrl}" - Método: ${req.method} - Payload: ${payloadLog} - IP del servidor activo: ${req.activeServer}`);
+});
+
+proxy.on('error', (err, req, res) => {
+    console.error(`Error en el proxy al enviar la solicitud al servidor ${req.activeServer}: ${err.message}`);
+    proxyToNextServer(req, res); // Busca el próximo servidor activo
 });
 
 const port = process.env.PORT || 3000;
