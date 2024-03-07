@@ -4,17 +4,15 @@
 ```
 npm install axios
 ```
-
-## Build Docker 
+## Create Image Balancer Docker
 ```
-docker build -t load-balancer .
+docker build -t balancer -f Dockerfile-loadBalancer .
 ```
-## Execute Docker directory LoadBalancer-Docker
+## Create Container Balancer Docker
 ```
-docker run -p 3000:3000 --env-file .env load-balancer
+docker run -d -p 3000:3000 --name balancer load-balancer
 ```
-
 ## search ip docker
 ```
-docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' codserver
+docker exec NAME_CONTAINER hostname -i
 ```
