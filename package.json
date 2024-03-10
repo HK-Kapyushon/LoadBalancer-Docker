@@ -16,7 +16,8 @@
     "http-proxy": "^1.18.1",
     "http-proxy-middleware": "^2.0.6",
     "loadtest": "^8.0.9",
-    "moment": "^2.30.1"
+    "moment": "^2.30.1",
+    "request": "^2.88.2"
   },
   "keywords": [],
   "author": "",

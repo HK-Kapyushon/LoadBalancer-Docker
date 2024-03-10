@@ -1,88 +1,41 @@
-require('dotenv').config();
 const express = require('express');
-const http = require('http');
+const app = express();
+const axios = require('axios');
+const dotenv = require('dotenv');
 const cors = require('cors');
 
-const app = express();
-
 app.use(cors());
+app.use(express.json()); // Middleware para analizar JSON en solicitudes POST
 
-let servers = process.env.SERVERS ? process.env.SERVERS.split(',') : [];
-let currentIndex = 0;
+dotenv.config();
 
-function checkServerStatus() {
-    servers.forEach((server) => {
-        const options = {
-            method: 'HEAD',
-        };
+const servers = process.env.SERVERS.split(',').map(server => server.trim());
+let currentServerIndex = 0;
 
-        const checkReq = http.request(server.trim(), options, (res) => {
-            if (res.statusCode === 200) {
-                console.log(`El servidor ${server} está activo.`);
-            } else {
-                console.error(`El servidor ${server} está caído.`);
-            }
-        });
-
-        checkReq.on('error', (error) => {
-            console.error(`Error al verificar el servidor ${server}: ${error}`);
-        });
-
-        checkReq.end();
+app.use((req, res, next) => {
+    const server = servers[currentServerIndex];
+    const timestamp = new Date().toISOString();
+  
+    // Utilizamos axios.request para manejar todas las solicitudes
+    axios.request({
+      method: req.method,
+      url: `http://${server}${req.url}`,
+      data: req.body
+    })
+    .then(response => {
+      console.log(`[${timestamp}] - URL: ${req.url} Metodo: ${response.status} ${response.statusText} Servidor: ${server} `);
+      res.send(response.data);
+      currentServerIndex = (currentServerIndex + 1) % servers.length;
+    })
+    .catch(error => {
+      // Registro de errores
+      console.error(`Error while connecting to ${server}:`, error.message);
+      currentServerIndex = (currentServerIndex + 1) % servers.length;
+      res.status(500).send('An error occurred while processing the request.');
     });
-}
-
-const statusCheckInterval = setInterval(checkServerStatus, 5 * 60 * 1000);
-
-function handleRequest(req, res, next) {
-    const activeServer = servers[currentIndex];
-    currentIndex = (currentIndex + 1) % servers.length;
-
-    let bodyData = [];
-    req.on('data', (chunk) => {
-        bodyData.push(chunk);
-    }).on('end', () => {
-        bodyData = Buffer.concat(bodyData).toString();
-        const options = {
-            method: req.method,
-            path: req.url,
-            headers: req.headers
-        };
-
-        const proxyReq = http.request({
-            hostname: activeServer.split(':')[0],
-            port: activeServer.split(':')[1],
-            ...options
-        }, (proxyRes) => {
-            if (proxyRes.statusCode !== 200) {
-                console.error(`Respuesta de error del servidor ${activeServer}: ${proxyRes.statusCode}`);
-                res.status(proxyRes.statusCode).send('Error del servidor');
-                return next();
-            }
-
-            res.writeHead(proxyRes.statusCode, proxyRes.headers);
-            proxyRes.pipe(res, { end: true });
-
-            const date = new Date();
-            const formattedDate = date.toISOString().slice(0, 10);
-            const formattedTime = date.toTimeString().slice(0, 8);
-            const payloadLog = bodyData ? JSON.stringify(bodyData) : '';
-            console.log(`[${formattedDate}/${formattedTime}] - URL: "${req.originalUrl}" - Método: ${req.method} - Payload: ${payloadLog} - IP del servidor activo: ${activeServer}`);
-        });
-
-        proxyReq.on('error', (error) => {
-            console.error(`Error en la solicitud proxy a ${activeServer}: ${error}`);
-            res.status(500).send('Error interno del servidor');
-            next(error);
-        });
-
-        req.pipe(proxyReq, { end: true });
-    });
-}
-
-app.all('*', handleRequest);
-
+  });
+  
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Balanceador de carga en ejecución en el puerto ${PORT}`);
+  console.log(`El balanceador de carga escucha al puerto: ${PORT}`);
 });
