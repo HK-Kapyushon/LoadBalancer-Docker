@@ -1,58 +1,88 @@
+require('dotenv').config();
 const express = require('express');
-const httpProxy = require('http-proxy');
+const http = require('http');
 const cors = require('cors');
-const dotenv = require('dotenv');
-const moment = require('moment');
-const bodyParser = require('body-parser');
-
-dotenv.config();
 
 const app = express();
-const proxy = httpProxy.createProxyServer();
-const servers = process.env.SERVERS.split(',');
-let currentServerIndex = 0;
-
-function getNextServer() {
-    const nextServer = servers[currentServerIndex];
-    currentServerIndex = (currentServerIndex + 1) % servers.length;
-    return nextServer;
-}
-
-function proxyToNextServer(req, res) {
-    const nextServer = getNextServer();
-    req.activeServer = nextServer;
-    
-    // Configurar un timeout de 3 segundos para intentar la conexión con el servidor
-    const proxyOptions = {
-        target: nextServer,
-        timeout: 10000 // Timeout de 3 segundos en milisegundos
-    };
-
-    proxy.web(req, res, proxyOptions);
-}
-
 
 app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
 
-app.use((req, res) => {
-    proxyToNextServer(req, res);
-});
+let servers = process.env.SERVERS ? process.env.SERVERS.split(',') : [];
+let currentIndex = 0;
 
-proxy.on('proxyRes', (proxyRes, req, res) => {
-    const formattedDate = moment().format('YYYY-MM-DD');
-    const formattedTime = moment().format('HH:mm:ss');
-    const payloadLog = req.body ? JSON.stringify(req.body) : "No hay payload";
-    console.log(`[${formattedDate}/${formattedTime}] - URL: "${req.originalUrl}" - Método: ${req.method} - Payload: ${payloadLog} - IP del servidor activo: ${req.activeServer}`);
-});
+function checkServerStatus() {
+    servers.forEach((server) => {
+        const options = {
+            method: 'HEAD',
+        };
 
-proxy.on('error', (err, req, res) => {
-    console.error(`Error en el proxy al enviar la solicitud al servidor ${req.activeServer}: ${err.message}`);
-    proxyToNextServer(req, res); // Busca el próximo servidor activo
-});
+        const checkReq = http.request(server.trim(), options, (res) => {
+            if (res.statusCode === 200) {
+                console.log(`El servidor ${server} está activo.`);
+            } else {
+                console.error(`El servidor ${server} está caído.`);
+            }
+        });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-    console.log(`Balanceador de carga escuchando en el puerto ${port}`);
+        checkReq.on('error', (error) => {
+            console.error(`Error al verificar el servidor ${server}: ${error}`);
+        });
+
+        checkReq.end();
+    });
+}
+
+const statusCheckInterval = setInterval(checkServerStatus, 5 * 60 * 1000);
+
+function handleRequest(req, res, next) {
+    const activeServer = servers[currentIndex];
+    currentIndex = (currentIndex + 1) % servers.length;
+
+    let bodyData = [];
+    req.on('data', (chunk) => {
+        bodyData.push(chunk);
+    }).on('end', () => {
+        bodyData = Buffer.concat(bodyData).toString();
+        const options = {
+            method: req.method,
+            path: req.url,
+            headers: req.headers
+        };
+
+        const proxyReq = http.request({
+            hostname: activeServer.split(':')[0],
+            port: activeServer.split(':')[1],
+            ...options
+        }, (proxyRes) => {
+            if (proxyRes.statusCode !== 200) {
+                console.error(`Respuesta de error del servidor ${activeServer}: ${proxyRes.statusCode}`);
+                res.status(proxyRes.statusCode).send('Error del servidor');
+                return next();
+            }
+
+            res.writeHead(proxyRes.statusCode, proxyRes.headers);
+            proxyRes.pipe(res, { end: true });
+
+            const date = new Date();
+            const formattedDate = date.toISOString().slice(0, 10);
+            const formattedTime = date.toTimeString().slice(0, 8);
+            const payloadLog = bodyData ? JSON.stringify(bodyData) : '';
+            console.log(`[${formattedDate}/${formattedTime}] - URL: "${req.originalUrl}" - Método: ${req.method} - Payload: ${payloadLog} - IP del servidor activo: ${activeServer}`);
+        });
+
+        proxyReq.on('error', (error) => {
+            console.error(`Error en la solicitud proxy a ${activeServer}: ${error}`);
+            res.status(500).send('Error interno del servidor');
+            next(error);
+        });
+
+        req.pipe(proxyReq, { end: true });
+    });
+}
+
+app.all('*', handleRequest);
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Balanceador de carga en ejecución en el puerto ${PORT}`);
 });
