@@ -3,9 +3,12 @@ const app = express();
 const axios = require('axios');
 const dotenv = require('dotenv');
 const cors = require('cors');
+const FormData = require('form-data');
+const fileUpload = require('express-fileupload'); 
 
 app.use(cors());
 app.use(express.json());
+app.use(fileUpload());
 dotenv.config();
 
 const servers = process.env.SERVERS.split(',').map(server => server.trim());
@@ -22,7 +25,7 @@ app.use((req, res, next) => {
     axios.request({
       method: req.method,
       url: `http://${server}${req.url}`,
-      data: req.body
+      data: req.method === 'POST' ? createFormData(req.body, req.files) : req.body
     })
     .then(response => {
       console.log(`[${timestamp}] - URL: ${req.url} Metodo: ${response.status} ${response.statusText} Servidor: ${server} `);
@@ -47,6 +50,20 @@ app.use((req, res, next) => {
   }
   attemptRequest();
 });
+
+function createFormData(body, files) {
+  const formData = new FormData();
+
+  for (const key in body) {
+    formData.append(key, body[key]);
+  }
+
+  for (const key in files) {
+    formData.append(key, files[key].data, files[key].name);
+  }
+
+  return formData;
+}
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
