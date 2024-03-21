@@ -3,69 +3,93 @@ const app = express();
 const axios = require('axios');
 const dotenv = require('dotenv');
 const cors = require('cors');
-const FormData = require('form-data');
-const fileUpload = require('express-fileupload'); 
+const fs = require('fs');
+const { exec } = require('child_process');
 
 app.use(cors());
 app.use(express.json());
-app.use(fileUpload());
 dotenv.config();
 
-const servers = process.env.SERVERS.split(',').map(server => server.trim());
-let currentServerIndex = 0;
+let ipPorts = [];
+let SERVERS = '';
 
+// Función para ejecutar el script que genera container.json en Windows
+function runScript() {
+    exec('cmd /c dockerls.bat', (error, stdout, stderr) => {
+        if (error) {
+            console.error(`Error al ejecutar el script: ${error.message}`);
+            return;
+        }
+        if (stderr) {
+            console.error(`Error de salida estándar del script: ${stderr}`);
+            return;
+        }
+        console.log(`Salida del script: ${stdout}`);
+        extractIPPorts(); // Después de ejecutar el script, extraemos las IPs y puertos
+    });
+}
+
+// Función para extraer IPs y puertos del archivo container.json
+function extractIPPorts() {
+    try {
+        const containerData = JSON.parse(fs.readFileSync('containers.json', 'utf8'));
+        ipPorts = containerData.map(container => `localhost:${container.PORTS.split('->')[0].split(':')[1]}`);
+        console.log("Lista de IP y Puertos:");
+        console.log(ipPorts); // Imprimir la lista de IPs y puertos en la consola
+        SERVERS = ipPorts.join(',');
+        console.log("SERVERS:", SERVERS); // Imprimir SERVERS después de actualizarlo
+    } catch (error) {
+        console.error('Error al leer o parsear el archivo containers.json:', error);
+    }
+}
+
+
+// Ejecutar el script al inicio de la aplicación
+runScript();
+
+// Primera ejecución al inicio de la aplicación
+extractIPPorts();
+
+// Verificar cambios en container.json cada 10 segundos
+setInterval(() => {
+    runScript(); // Ejecutar el script para actualizar container.json
+    extractIPPorts(); // Extraer IPs y puertos del nuevo archivo
+}, 10000);
+
+// Middleware de balanceo de carga
+let currentIndex = 0; // Índice actual de servidor
 app.use((req, res, next) => {
-  let attemptCount = 0;
-  const maxAttempts = servers.length;
+    const servers = SERVERS.split(',');
+    const serverCount = servers.length;
 
-  function attemptRequest() {
-    const server = servers[currentServerIndex];
+    // Determinar qué servidor manejará esta solicitud
+    const serverIndex = currentIndex % serverCount;
+    const server = servers[serverIndex];
+
+    // Incrementar el índice para la próxima solicitud
+    currentIndex++;
+
     const timestamp = new Date().toISOString();
 
     axios.request({
-      method: req.method,
-      url: `http://${server}${req.url}`,
-      data: req.method === 'POST' ? createFormData(req.body, req.files) : req.body
+        method: req.method,
+        url: `http://${server}${req.url}`,
+        data: req.body
     })
     .then(response => {
-      console.log(`[${timestamp}] - URL: ${req.url} Metodo: ${response.status} ${response.statusText} Servidor: ${server} `);
-      res.send(response.data);
-      currentServerIndex = (currentServerIndex + 1) % servers.length;
+        console.log(`[${timestamp}] - URL: ${req.url} Método: ${response.status} ${response.statusText} Servidor: ${server}`);
+        res.send(response.data);
     })
     .catch(error => {
-      console.error(`Error de conexión con ${server}:`, error.message);
-      
-      // Intentar con el siguiente servidor disponible
-      currentServerIndex = (currentServerIndex + 1) % servers.length;
-      
-      // Si no se han alcanzado el límite de intentos, volver a intentar la solicitud con el siguiente servidor
-      if (attemptCount < maxAttempts - 1) {
-        attemptCount++;
-        attemptRequest();
-      } else {
-        // Si se han alcanzado el límite de intentos, pasar al siguiente middleware
+        console.error(`Error de conexión con ${server}:`, error.message);
+        // Si hay un error, continuar con el siguiente servidor
         next();
-      }
     });
-  }
-  attemptRequest();
 });
 
-function createFormData(body, files) {
-  const formData = new FormData();
 
-  for (const key in body) {
-    formData.append(key, body[key]);
-  }
-
-  for (const key in files) {
-    formData.append(key, files[key].data, files[key].name);
-  }
-
-  return formData;
-}
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`El balanceador de carga escucha al puerto: ${PORT}`);
+    console.log(`El balanceador de carga escucha al puerto: ${PORT}`);
 });

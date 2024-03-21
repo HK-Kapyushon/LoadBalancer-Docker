@@ -1,0 +1,22 @@
+[
+{
+"CONTAINER ID": "9f27d123a286",
+"PORTS": "0.0.0.0:3003->3003/tcp",
+"NAME": "server3",
+"IP": "172.17.0.5"
+}
+,
+{
+"CONTAINER ID": "abb3e7ce7fe0",
+"PORTS": "0.0.0.0:3002->3002/tcp",
+"NAME": "server2",
+"IP": "172.17.0.4"
+}
+,
+{
+"CONTAINER ID": "e4441dd76fc2",
+"PORTS": "0.0.0.0:3001->3001/tcp",
+"NAME": "server1",
+"IP": "172.17.0.3"
+}
+]
