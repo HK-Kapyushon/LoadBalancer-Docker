@@ -10,57 +10,41 @@ app.use(cors());
 app.use(express.json());
 dotenv.config();
 
-let ipPorts = [];
-let SERVERS = '';
+let SERVERS = "";
 
-// Función para ejecutar el script que genera container.json en Windows
-function runScript() {
-    exec('cmd /c dockerls.bat', (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Error al ejecutar el script: ${error.message}`);
-            return;
-        }
-        if (stderr) {
-            console.error(`Error de salida estándar del script: ${stderr}`);
-            return;
-        }
-        console.log(`Salida del script: ${stdout}`);
-        extractIPPorts(); // Después de ejecutar el script, extraemos las IPs y puertos
-    });
-}
-
-// Función para extraer IPs y puertos del archivo container.json
-function extractIPPorts() {
+function updateServers(ip, port) {
     try {
-        const containerData = JSON.parse(fs.readFileSync('containers.json', 'utf8'));
-        ipPorts = containerData.map(container => `localhost:${container.PORTS.split('->')[0].split(':')[1]}`);
-        console.log("Lista de IP y Puertos:");
-        console.log(ipPorts); // Imprimir la lista de IPs y puertos en la consola
-        SERVERS = ipPorts.join(',');
-        console.log("SERVERS:", SERVERS); // Imprimir SERVERS después de actualizarlo
+        const newServer = `${ip}:${port}`;
+        if (!SERVERS.includes(newServer)) {
+            SERVERS += (SERVERS ? ',' : '') + newServer;
+            console.log("Lista de IP y Puertos actualizada:");
+            console.log(SERVERS);
+        }
     } catch (error) {
-        console.error('Error al leer o parsear el archivo containers.json:', error);
+        console.error('Error al actualizar SERVERS:', error);
     }
 }
 
+app.post('/register-node', (req, res) => {
+    const { ip, port } = req.body;
+    
+    console.log(`Nodo registrado: IP ${ip}, Puerto ${port}`);
+    
+    updateServers(ip, port);
+    
+    res.status(200).send('Nodo registrado exitosamente');
+});
 
-// Ejecutar el script al inicio de la aplicación
-runScript();
-
-// Primera ejecución al inicio de la aplicación
-extractIPPorts();
-
-// Verificar cambios en container.json cada 10 segundos
-setInterval(() => {
-    runScript(); // Ejecutar el script para actualizar container.json
-    extractIPPorts(); // Extraer IPs y puertos del nuevo archivo
-}, 10000);
-
-// Middleware de balanceo de carga
 let currentIndex = 0; // Índice actual de servidor
 app.use((req, res, next) => {
-    const servers = SERVERS.split(',');
+    const servers = SERVERS.split(',').filter(server => server); // Eliminar valores vacíos
     const serverCount = servers.length;
+
+    if (serverCount === 0) {
+        console.error('No hay servidores disponibles.');
+        res.status(500).send('No hay servidores disponibles.');
+        return;
+    }
 
     // Determinar qué servidor manejará esta solicitud
     const serverIndex = currentIndex % serverCount;
@@ -86,8 +70,6 @@ app.use((req, res, next) => {
         next();
     });
 });
-
-
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
