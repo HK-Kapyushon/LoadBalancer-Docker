@@ -27,15 +27,12 @@ function updateServers(ip, port) {
 
 app.post('/register-node', (req, res) => {
     const { ip, port } = req.body;
-    
-    console.log(`Nodo registrado: IP ${ip}, Puerto ${port}`);
-    
     updateServers(ip, port);
-    
+    console.log(`Nodo registrado: IP ${ip}, Puerto ${port}`);
     res.status(200).send('Nodo registrado exitosamente');
 });
 
-let currentIndex = 0; // Índice actual de servidor
+let currentIndex = 0;
 app.use((req, res, next) => {
     const servers = SERVERS.split(',').filter(server => server); // Eliminar valores vacíos
     const serverCount = servers.length;
@@ -66,7 +63,6 @@ app.use((req, res, next) => {
     })
     .catch(error => {
         console.error(`Error de conexión con ${server}:`, error.message);
-        // Si hay un error, continuar con el siguiente servidor
         next();
     });
 });
